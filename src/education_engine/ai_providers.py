@@ -1,10 +1,10 @@
-﻿import os
+import os
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Literal
 
 
-ProviderName = Literal["openai", "claude", "none"]
+ProviderName = Literal["mistral", "openai", "claude", "none"]
 
 BASE_DIR = Path(__file__).resolve().parent
 ENV_PATH = BASE_DIR / ".env"
@@ -50,7 +50,7 @@ def env_bool(name: str, default: bool = False) -> bool:
 def env_provider(name: str, default: ProviderName = "none") -> ProviderName:
     value = str(os.getenv(name, default)).strip().lower()
 
-    if value in ["openai", "claude", "none"]:
+    if value in ["mistral", "openai", "claude", "none"]:
         return value  # type: ignore
 
     return default
@@ -58,6 +58,7 @@ def env_provider(name: str, default: ProviderName = "none") -> ProviderName:
 
 @dataclass
 class AIProviderConfig:
+    mistral_enabled: bool
     openai_enabled: bool
     claude_enabled: bool
     default_provider: ProviderName
@@ -66,20 +67,23 @@ class AIProviderConfig:
     openai_quality_enabled: bool
     claude_generation_enabled: bool
     claude_quality_enabled: bool
+    mistral_key_present: bool
     openai_key_present: bool
     anthropic_key_present: bool
 
 
 def get_ai_provider_config() -> AIProviderConfig:
     return AIProviderConfig(
+        mistral_enabled=env_bool("EDUCATION_AI_MISTRAL_ENABLED", True),
         openai_enabled=env_bool("ASKCI_OPENAI_ENABLED", True),
         claude_enabled=env_bool("ASKCI_CLAUDE_ENABLED", False),
-        default_provider=env_provider("ASKCI_DEFAULT_AI_PROVIDER", "openai"),
-        fallback_provider=env_provider("ASKCI_FALLBACK_AI_PROVIDER", "none"),
+        default_provider=env_provider("EDUCATION_AI_DEFAULT_PROVIDER", "mistral"),
+        fallback_provider=env_provider("EDUCATION_AI_FALLBACK_PROVIDER", "openai"),
         openai_generation_enabled=env_bool("ASKCI_OPENAI_GENERATION_ENABLED", True),
         openai_quality_enabled=env_bool("ASKCI_OPENAI_QUALITY_ENABLED", True),
         claude_generation_enabled=env_bool("ASKCI_CLAUDE_GENERATION_ENABLED", False),
         claude_quality_enabled=env_bool("ASKCI_CLAUDE_QUALITY_ENABLED", False),
+        mistral_key_present=bool(os.getenv("MISTRAL_API_KEY", "").strip()),
         openai_key_present=bool(os.getenv("OPENAI_API_KEY", "").strip()),
         anthropic_key_present=bool(os.getenv("ANTHROPIC_API_KEY", "").strip()),
     )
@@ -90,6 +94,9 @@ def is_provider_available(provider: ProviderName, task: Literal["generation", "q
 
     if provider == "none":
         return False
+
+    if provider == "mistral":
+        return config.mistral_enabled and config.mistral_key_present
 
     if provider == "openai":
         if not config.openai_enabled or not config.openai_key_present:
@@ -122,6 +129,9 @@ def choose_provider(task: Literal["generation", "quality"]) -> ProviderName:
 
     if is_provider_available(config.fallback_provider, task):
         return config.fallback_provider
+
+    if is_provider_available("mistral", task):
+        return "mistral"
 
     if is_provider_available("openai", task):
         return "openai"

@@ -8,6 +8,7 @@ import sys
 from typing import Any
 
 from openai import OpenAI
+from mistralai.client import Mistral
 from supabase import create_client
 
 from ai_providers import (
@@ -979,6 +980,41 @@ def generate_with_openai(
     except Exception:
         return str(response)
 
+
+def generate_with_mistral(
+    client: Mistral,
+    model: str,
+    prompt: str,
+) -> str:
+    response = client.chat.complete(
+        model=model,
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Tu génères des contenus pédagogiques originaux, cohérents, "
+                    "adaptés au niveau scolaire et entièrement en français. "
+                    "Tu respectes strictement la consigne concernant la présence ou non du corrigé. "
+                    "Pour les devoirs, compositions et examens, tu adoptes un style académique strict "
+                    "et tu évites toute contradiction pédagogique."
+                ),
+            },
+            {
+                "role": "user",
+                "content": prompt,
+            },
+        ],
+    )
+
+    if not response.choices:
+        raise RuntimeError("Mistral n'a retourné aucune réponse.")
+
+    content = response.choices[0].message.content
+
+    if isinstance(content, str):
+        return content.strip()
+
+    return str(content).strip()
 
 def generate_with_claude_placeholder(
     prompt: str,
