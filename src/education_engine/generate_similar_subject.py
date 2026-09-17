@@ -4,9 +4,12 @@ import argparse
 import json
 import os
 import re
+import ssl
 import sys
 from typing import Any
 
+import httpx
+import truststore
 from openai import OpenAI
 from mistralai.client import Mistral
 from supabase import create_client
@@ -23,6 +26,7 @@ ENV_PATH = BASE_DIR / ".env"
 
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 DEFAULT_GENERATION_MODEL = "gpt-4.1-mini"
+DEFAULT_MISTRAL_GENERATION_MODEL = "ministral-3b-latest"
 
 TABLE_GENERATED_SUBJECTS = "generated_subjects"
 
@@ -1016,6 +1020,13 @@ def generate_with_mistral(
 
     return str(content).strip()
 
+
+def create_mistral_client(api_key: str) -> Mistral:
+    """Use the Windows trust store while keeping TLS verification enabled."""
+    ssl_context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    http_client = httpx.Client(verify=ssl_context)
+    return Mistral(api_key=api_key, client=http_client)
+
 def generate_with_claude_placeholder(
     prompt: str,
     task: str,
@@ -1033,7 +1044,9 @@ def generate_with_claude_placeholder(
 
 def generate_text_with_provider(
     openai_client: OpenAI,
-    model: str,
+    mistral_client: Mistral | None,
+    openai_model: str,
+    mistral_model: str,
     prompt: str,
 ) -> str:
     """
@@ -1043,10 +1056,20 @@ def generate_text_with_provider(
     """
     provider = assert_provider_available("generation")
 
+    if provider == "mistral":
+        if mistral_client is None:
+            raise RuntimeError("Le client Mistral n'est pas configure.")
+
+        return generate_with_mistral(
+            client=mistral_client,
+            model=mistral_model,
+            prompt=prompt,
+        )
+
     if provider == "openai":
         return generate_with_openai(
             client=openai_client,
-            model=model,
+            model=openai_model,
             prompt=prompt,
         )
 
@@ -1519,10 +1542,15 @@ def main() -> None:
         DEFAULT_EMBEDDING_MODEL,
     ).strip() or DEFAULT_EMBEDDING_MODEL
 
-    generation_model = os.getenv(
+    openai_generation_model = os.getenv(
         "OPENAI_GENERATION_MODEL",
         DEFAULT_GENERATION_MODEL,
     ).strip() or DEFAULT_GENERATION_MODEL
+
+    mistral_generation_model = os.getenv(
+        "MISTRAL_GENERATION_MODEL",
+        DEFAULT_MISTRAL_GENERATION_MODEL,
+    ).strip() or DEFAULT_MISTRAL_GENERATION_MODEL
 
     question = build_question(
         matiere=matiere,
@@ -1534,6 +1562,13 @@ def main() -> None:
     )
 
     openai_client = OpenAI(api_key=openai_api_key)
+    selected_generation_provider = choose_provider("generation")
+    mistral_api_key = os.getenv("MISTRAL_API_KEY", "").strip()
+    mistral_client = (
+        create_mistral_client(mistral_api_key)
+        if selected_generation_provider == "mistral" and mistral_api_key
+        else None
+    )
     supabase = create_client(supabase_url, supabase_key)
 
     print("ASKCI ÉDUCATION — GÉNÉRATION DYNAMIQUE DE SUJET SIMILAIRE")
@@ -1549,10 +1584,16 @@ def main() -> None:
     ai_status = provider_status()
 
     print(f"Modèle embedding  : {embedding_model}")
+    generation_model = (
+        mistral_generation_model
+        if selected_generation_provider == "mistral"
+        else openai_generation_model
+    )
     print(f"Modèle génération : {generation_model}")
     print(f"IA génération     : {ai_status.get('selected_generation_provider')}")
     print(f"IA qualité        : {ai_status.get('selected_quality_provider')}")
     print(f"OpenAI actif      : {ai_status.get('openai_generation_available')}")
+    print(f"Mistral actif     : {ai_status.get('mistral_generation_available')}")
     print(f"Claude actif      : {ai_status.get('claude_generation_available')}")
     print("=" * 80)
 
@@ -1638,13 +1679,15 @@ def main() -> None:
 
     generated = generate_text_with_provider(
         openai_client=openai_client,
-        model=generation_model,
+        mistral_client=mistral_client,
+        openai_model=openai_generation_model,
+        mistral_model=mistral_generation_model,
         prompt=generation_prompt,
     )
 
     qa_report = run_quality_check_with_provider(
         openai_client=openai_client,
-        model=generation_model,
+        model=openai_generation_model,
         generated_subject=generated,
         matiere=matiere,
         niveau=niveau,
@@ -1680,13 +1723,15 @@ def main() -> None:
 
         generated = generate_text_with_provider(
             openai_client=openai_client,
-            model=generation_model,
+            mistral_client=mistral_client,
+            openai_model=openai_generation_model,
+            mistral_model=mistral_generation_model,
             prompt=repair_prompt,
         )
 
         qa_report = run_quality_check_with_provider(
             openai_client=openai_client,
-            model=generation_model,
+            model=openai_generation_model,
             generated_subject=generated,
             matiere=matiere,
             niveau=niveau,

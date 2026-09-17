@@ -59,6 +59,7 @@ def env_provider(name: str, default: ProviderName = "none") -> ProviderName:
 @dataclass
 class AIProviderConfig:
     mistral_enabled: bool
+    mistral_generation_enabled: bool
     openai_enabled: bool
     claude_enabled: bool
     default_provider: ProviderName
@@ -75,6 +76,9 @@ class AIProviderConfig:
 def get_ai_provider_config() -> AIProviderConfig:
     return AIProviderConfig(
         mistral_enabled=env_bool("EDUCATION_AI_MISTRAL_ENABLED", True),
+        mistral_generation_enabled=env_bool(
+            "EDUCATION_AI_MISTRAL_GENERATION_ENABLED", True
+        ),
         openai_enabled=env_bool("ASKCI_OPENAI_ENABLED", True),
         claude_enabled=env_bool("ASKCI_CLAUDE_ENABLED", False),
         default_provider=env_provider("EDUCATION_AI_DEFAULT_PROVIDER", "mistral"),
@@ -96,7 +100,12 @@ def is_provider_available(provider: ProviderName, task: Literal["generation", "q
         return False
 
     if provider == "mistral":
-        return config.mistral_enabled and config.mistral_key_present
+        return (
+            task == "generation"
+            and config.mistral_enabled
+            and config.mistral_generation_enabled
+            and config.mistral_key_present
+        )
 
     if provider == "openai":
         if not config.openai_enabled or not config.openai_key_present:
@@ -146,6 +155,10 @@ def provider_status() -> dict:
     config = get_ai_provider_config()
 
     return {
+        "mistral_enabled": config.mistral_enabled,
+        "mistral_key_present": config.mistral_key_present,
+        "mistral_generation_available": is_provider_available("mistral", "generation"),
+        "mistral_quality_available": is_provider_available("mistral", "quality"),
         "openai_enabled": config.openai_enabled,
         "claude_enabled": config.claude_enabled,
         "default_provider": config.default_provider,
